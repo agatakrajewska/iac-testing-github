@@ -1,0 +1,113 @@
+{{- if .Values.syncer.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: syncer
+    {{- include "slurm.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-syncer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer-role
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: syncer
+    {{- include "slurm.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-syncer-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - sunk.coreweave.com
+  resources:
+  - nodesets
+  verbs:
+  - get
+  - list
+  - watch
+---
+{{- if .Values.syncer.nodePermissions.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer-clusterrole
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: syncer
+    {{- include "slurm.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-syncer-clusterrole
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - nodes/status
+  verbs:
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer-clusterrolebinding
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: syncer
+    {{- include "slurm.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-syncer-clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-syncer
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-syncer-clusterrole
+---
+{{- end }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer-rolebinding
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: syncer
+    {{- include "slurm.labels" . | nindent 4 }}
+  name: {{ .Release.Name }}-syncer-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ .Release.Name }}-syncer-role
+subjects:
+- kind: ServiceAccount
+  name: {{ .Release.Name }}-syncer
+---
+{{- end }}

@@ -1,0 +1,5 @@
+cu118:
+  features:
+  - cu118
+  image:
+    repository: registry.gitlab.com/coreweave/sunk/slurmd-cw-cu118-extras

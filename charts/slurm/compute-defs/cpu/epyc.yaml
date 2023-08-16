@@ -1,0 +1,25 @@
+epyc:
+  features:
+    - cpu
+    - amd
+  gresGpu: null
+
+  resources:
+    limits:
+      memory: 176Gi
+      cpu: "48"
+    requests:
+      # Some cores are requested by SSSD, munge etc but they are all available if not used for jobs
+      cpu: "40"
+      memory: 176Gi
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node.coreweave.cloud/cpu
+                operator: In
+                values:
+                  - amd-epyc-rome
+                  - amd-epyc-milan

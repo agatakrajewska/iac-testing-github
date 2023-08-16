@@ -1,0 +1,8 @@
+pytorch-ngc:
+  features:
+    - cu118
+    - pytorch
+    - pytorch13
+    - ngc
+  image:
+    repository: registry.gitlab.com/coreweave/sunk/slurmd-pytorch-ngc-extras

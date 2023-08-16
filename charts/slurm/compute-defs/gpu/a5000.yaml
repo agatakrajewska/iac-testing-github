@@ -1,0 +1,25 @@
+a5000:
+  resources:
+    limits:
+      memory: 200Gi
+      sunk.coreweave.com/accelerator: "4"
+    requests:
+      cpu: "32"
+      memory: 200Gi
+      sunk.coreweave.com/accelerator: "4"
+
+  gresGpu: rtx_a5000:4
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                  - LAS1
+              - key: gpu.nvidia.com/model
+                operator: In
+                values:
+                  - RTX_A5000

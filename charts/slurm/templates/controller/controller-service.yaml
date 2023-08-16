@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-controller
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: slurmctld
+    app.kubernetes.io/instance: {{ .Release.Name }}-controller
+    app.kubernetes.io/component: "controller"
+    {{- include "slurm.labels" . | nindent 4 }}
+  ports:
+  - name: slurmctld
+    protocol: TCP
+    port: 6817
+    targetPort: 6817

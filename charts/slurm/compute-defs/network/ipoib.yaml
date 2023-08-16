@@ -1,0 +1,3 @@
+ipoib:
+  annotations:
+    net.coreweave.cloud/ipoib: "true"

@@ -1,0 +1,24 @@
+xeon:
+  features:
+    - cpu
+    - xeon
+  gresGpu: null
+
+  resources:
+    limits:
+      memory: 250Gi
+      cpu: "70"
+    requests:
+      # Some cores are requested by SSSD, munge etc but they are all available if not used for jobs
+      cpu: "70"
+      memory: 250Gi
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node.coreweave.cloud/cpu
+                operator: In
+                values:
+                  - intel-xeon-v4
