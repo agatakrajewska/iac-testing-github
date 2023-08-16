@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-syncer
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}-syncer
+    app.kubernetes.io/instance: {{ .Release.Name }}-syncer
+    app.kubernetes.io/component: "syncer"
+    {{- include "slurm.labels" . | nindent 4 }}
+  ports:
+  - name: hooksapi
+    protocol: TCP
+    port: 8000
+    targetPort: 8000
