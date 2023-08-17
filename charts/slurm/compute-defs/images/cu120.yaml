@@ -1,5 +1,0 @@
-cu120:
-  features:
-  - cu120
-  image:
-    repository: registry.gitlab.com/coreweave/sunk/slurmd-cw-cu120-extras

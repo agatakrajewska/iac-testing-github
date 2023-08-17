@@ -1,5 +1,0 @@
-nemo:
-  image:
-    repository: registry.gitlab.com/coreweave/sunk/slurmd-nemo-ngc
-  features:
-  - ngc
