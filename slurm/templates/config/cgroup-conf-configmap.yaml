@@ -1,0 +1,16 @@
+{{- if eq .Values.slurmConfig.slurmCtld.procTrackType "proctrack/cgroup" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-cgroup-conf
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+data:
+  cgroup.conf: |
+    CgroupPlugin=autodetect
+    IgnoreSystemd=yes
+    CgroupAutomount=no
+    ConstrainCores=yes
+    ConstrainDevices=yes
+    ConstrainRAMSpace=yes
+{{- end }}

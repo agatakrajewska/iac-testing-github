@@ -1,0 +1,25 @@
+{{- if .Values.compute.pyxis.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-enroot-conf
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+data:
+  enroot.conf: |
+    ENROOT_RUNTIME_PATH /run/enroot/user-$(id -u)
+    ENROOT_CACHE_PATH /opt/sunk/tmp/enroot-cache/user-$(id -u)
+    ENROOT_DATA_PATH /opt/sunk/tmp/enroot-data/user-$(id -u)
+    {{- if .Values.compute.pyxis.mountHome }}
+    ENROOT_MOUNT_HOME y
+    {{- else }}
+    ENROOT_MOUNT_HOME n
+    {{- end }}
+    {{- if .Values.compute.pyxis.remapRoot }}
+    ENROOT_REMAP_ROOT y
+    {{- else }}
+    ENROOT_REMAP_ROOT n
+    {{- end }}
+    ENROOT_RESTRICT_DEV n
+    ENROOT_ROOTFS_WRITABLE y
+{{- end }}

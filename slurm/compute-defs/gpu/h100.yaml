@@ -1,0 +1,26 @@
+h100:
+  features:
+    - gpu
+    - infiniband
+    - sharp
+  resources:
+    limits:
+      memory: 960Gi
+      sunk.coreweave.com/accelerator: "8"
+      rdma/ib: "1"
+    requests:
+      cpu: "110"
+      memory: 960Gi
+      sunk.coreweave.com/accelerator: "8"
+
+  gresGpu: h100:8
+
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: gpu.nvidia.com/class
+                operator: In
+                values:
+                  - H100_NVLINK_80GB

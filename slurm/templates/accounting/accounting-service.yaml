@@ -1,0 +1,20 @@
+{{- if (and .Values.accounting.enabled (not .Values.accounting.external.enabled)) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-accounting
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: slurmdbd
+    app.kubernetes.io/instance: {{ .Release.Name }}-accounting
+    app.kubernetes.io/component: "accounting"
+    {{- include "slurm.labels" . | nindent 4 }}
+  ports:
+  - name: slurmdbd
+    protocol: TCP
+    port: 6819
+    targetPort: 6819
+{{- end }}

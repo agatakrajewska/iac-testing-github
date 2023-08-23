@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-rest
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: slurmrestd
+      app.kubernetes.io/instance: {{ .Release.Name }}-rest
+      app.kubernetes.io/component: "rest"
+      {{- include "slurm.labels" . | nindent 6 }}
+  replicas: {{ .Values.rest.replicas }} # by default is 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: slurmrestd
+        app.kubernetes.io/instance: {{ .Release.Name }}-rest
+        app.kubernetes.io/component: "rest"
+        {{- include "slurm.labels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: "slurmrestd"
+        {{- include "slurm.networkAffinities" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.rest.terminationGracePeriodSeconds }}
+      {{- include "slurm.dnsConfig" . | nindent 6 }}
+      enableServiceLinks: false
+      hostname: {{ .Release.Name }}-rest
+      initContainers:
+      # The initcontainer is needed mostly to persist etc from the image in an emptyDir
+      # This way we can modify /etc/passwd and similar via a SSSD sidecar
+      - name: init
+        image: "{{ .Values.controller.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.controller.image.tag }}"
+        command: ["/usr/share/sunk/bin/init.sh"]
+        env:
+        - name: ROLE
+          value: "rest"
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /runtime/var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: etc
+          mountPath: /runtime/etc
+        - name: run
+          mountPath: /run
+        - name: munge
+          mountPath: /munge/munge.secret.key
+          subPath: munge.key
+          readOnly: true
+      containers:
+      {{- include "slurm.sssdContainer" . | nindent 6 }}
+      - name: munged
+        {{- include "slurm.mungedContainer" . | nindent 8 }}
+      - name: slurmrestd
+        image: "{{ .Values.controller.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.controller.image.tag }}"
+        command: ["slurmrestd", "-v", "-v", "0.0.0.0:6819"]
+        ports:
+        - containerPort: 6819
+          name: slurmrestd
+        env:
+        - name: SLURMRESTD_SECURITY
+          value: disable_unshare_sysv,disable_unshare_files
+        - name: SLURM_JWT
+          value: enabled
+        resources:
+          {{- toYaml .Values.rest.resources | nindent 10 }}
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: run
+          mountPath: /run
+        - name: etc
+          mountPath: /etc
+        - name: slurm-conf
+          mountPath: /etc/slurm
+          readOnly: true
+        startupProbe:
+          tcpSocket:
+            port: slurmrestd
+          failureThreshold: 20
+          periodSeconds: 2
+        livenessProbe:
+          tcpSocket:
+            port: slurmrestd
+          failureThreshold: 2
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: slurmrestd
+          periodSeconds: 5
+          failureThreshold: 1
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: {{ .Values.rest.securityContext.runAsUser }}
+          runAsGroup: {{ .Values.rest.securityContext.runAsGroup }}
+      volumes:
+      {{- include "slurm.runtimeVolumes" . | nindent 6 }}
+      {{- include "slurm.config.volume" . | nindent 6 }}
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.rest.priorityClassName }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - {{ .Values.nodeSelector.region }}
+              - key: cpu.coreweave.cloud/family
+                operator: In
+                values:
+                  - epyc
+      tolerations:
+        {{- toYaml .Values.controller.tolerations | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

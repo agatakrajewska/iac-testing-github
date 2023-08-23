@@ -1,0 +1,134 @@
+{{- if (and .Values.accounting.enabled (not .Values.accounting.external.enabled)) }}
+{{- if not .Values.mysql.enabled }}
+{{- fail ".Values.mysql.enabled must be true when .Values.accounting.enabled is true and .Values.accounting.external.enabled is false" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-accounting
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: slurmdbd
+      app.kubernetes.io/instance: {{ .Release.Name }}-accounting
+      app.kubernetes.io/component: "accounting"
+      {{- include "slurm.labels" . | nindent 6 }}
+  replicas: {{ .Values.accounting.replicas }} # by default is 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: slurmdbd
+        app.kubernetes.io/instance: {{ .Release.Name }}-accounting
+        app.kubernetes.io/component: "accounting"
+        {{- include "slurm.labels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: "slurmdbd"
+        {{- include "slurm.networkAffinities" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.accounting.terminationGracePeriodSeconds }}
+      hostname: {{ .Release.Name }}-accounting
+      initContainers:
+      # The initcontainer is needed mostly to persist etc from the image in an emptyDir
+      # This way we can modify /etc/passwd and similar via a SSSD sidecar
+      - name: init
+        image: "{{ .Values.controller.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.controller.image.tag }}"
+        command: ["/usr/share/sunk/bin/init.sh"]
+        env:
+        - name: ROLE
+          value: "accounting"
+        - name: SLURM_USER
+          value: "{{ .Values.accounting.securityContext.runAsUser }}"
+        - name: SLURM_GROUP
+          value: "{{ .Values.accounting.securityContext.runAsGroup }}"
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-mysql
+              key: mysql-password
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /runtime/var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: etc
+          mountPath: /runtime/etc
+        - name: run
+          mountPath: /run
+        - name: munge
+          mountPath: /munge/munge.secret.key
+          subPath: munge.key
+          readOnly: true
+        - name: slurmdbd-conf
+          mountPath: /slurm
+      containers:
+      {{- include "slurm.sssdContainer" . | nindent 6 }}
+      - name: munged
+        {{- include "slurm.mungedContainer" . | nindent 8 }}
+      - name: slurmdbd
+        image: "{{ .Values.controller.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.controller.image.tag }}"
+        command: ["slurmdbd", "-D"]
+        resources:
+          {{- toYaml .Values.accounting.resources | nindent 10 }}
+        ports:
+        - containerPort: 6819
+          name: slurmdbd
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: run
+          mountPath: /run
+        - name: etc
+          mountPath: /etc
+        - name: jwt-secret
+          mountPath: {{ include "slurm.jwt.path" . }}
+          subPath: jwt.key
+          readOnly: true
+        livenessProbe:
+          tcpSocket:
+            port: 6819
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 5
+          successThreshold: 1
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: {{ .Values.accounting.securityContext.runAsUser }}
+          runAsGroup: {{ .Values.accounting.securityContext.runAsGroup }}
+      volumes:
+      {{- include "slurm.runtimeVolumes" . | nindent 6 }}
+      - name: jwt-secret
+        secret:
+          secretName: {{ include "slurm.jwt.secretName" . }}
+      - name: slurm-conf
+        configMap:
+          name: {{ .Release.Name }}-slurm-conf
+      - name: slurmdbd-conf
+        configMap:
+          name: {{ .Release.Name }}-slurmdbd-conf
+          defaultMode: 0600
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.accounting.priorityClassName }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - {{ .Values.nodeSelector.region }}
+              - key: cpu.coreweave.cloud/family
+                operator: In
+                values:
+                  - epyc
+{{- end }}

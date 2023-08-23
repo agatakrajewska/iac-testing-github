@@ -1,0 +1,84 @@
+{{- if (include "directories" . ) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-sssd-conf
+data:
+  sssd.conf: |
+    {{- range .Values.directoryService.directories -}}
+    {{- if .enabled }}
+    [domain/{{ .name }}]
+    cache_credentials = True
+    debug_level = {{ default $.Values.directoryService.debugLevel .debugLevel }}
+    default_shell = {{ .defaultShell }}
+    fallback_homedir = {{ .fallbackHomeDir }}
+    {{- if .overrideHomeDir }}
+    override_homedir = {{ .overrideHomeDir }}
+    {{- end }}
+    id_provider = ldap
+    {{- if (.user).password }}
+    ldap_default_authtok = {{ .user.password }}
+    {{- end }}
+    {{- if (.user).bindDn }}
+    ldap_default_bind_dn = {{ .user.bindDn }}
+    {{- end }}
+    {{- if (.user).searchBase }}
+    ldap_search_base = {{ .user.searchBase }}
+    {{- end }}
+    ldap_tls_reqcert = allow
+    ldap_uri = {{ .ldapUri }}
+    {{- if eq .name "default" }}
+    use_fully_qualified_names = False
+    {{- else }}
+    use_fully_qualified_names = true
+    {{- end }}
+    # Enumerate all entries to get generate full passwd file
+    enumerate = true
+    ignore_group_members = True
+    ldap_purge_cache_timeout = 0
+    krb5_auth_timeout = 10
+    
+
+    {{- if eq .schema "AD" }}
+    ldap_schema = AD
+    ldap_id_mapping = True
+    ldap_referrals = False
+    ldap_user_extra_attrs = altSecurityIdentities
+    ldap_user_ssh_public_key = altSecurityIdentities
+    {{- else }}
+    ldap_schema = {{ .schema }}
+    auth_provider = ldap
+    ldap_access_order = filter
+    ldap_access_filter = (objectClass=posixAccount)
+    {{ end }}
+
+    {{- if .ldapsCert -}}
+    ldap_tls_cert = /var/lib/sss/pipes/certificate/{{ .name }}/tls.crt
+    ldap_tls_key = /var/lib/sss/pipes/certificate/{{ .name }}/tls.key
+    {{ end }}
+    {{ end }}
+    {{- end }}
+    [sssd]
+    {{- if .Values.directoryService.debugLevel }}
+    debug_level = {{ .Values.directoryService.debugLevel }}
+    {{- end }}
+    config_file_version = 2
+    services = nss, pam, ssh
+    domains = {{ include "directories" . }}
+    [nss]
+    {{- if .Values.directoryService.debugLevel }}
+    debug_level = {{ .Values.directoryService.debugLevel }}
+    {{- end }}
+    filter_users = nobody,root
+    filter_groups = nobody,root
+    entry_negative_timeout = {{ default "60" .Values.directoryService.negativeCacheTimeout }}
+    # cache enumeration value for 10 mins instead of 2
+    enum_cache_timeout = 600
+    entry_cache_nowait_percentage = 0
+    [pam]
+    {{- if .Values.directoryService.debugLevel }}
+    debug_level = {{ .Values.directoryService.debugLevel }}
+    {{- end }}
+    offline_credentials_expiration = 7
+    pam_id_timeout = 10
+{{- end -}}

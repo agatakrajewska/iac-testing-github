@@ -1,0 +1,268 @@
+{{- $outer := . }}
+{{- range $name, $v := .Values.compute.nodes }}
+  {{- if $v.definitions }}
+    {{- $dest := ($.Files.Get "compute-defs/base.yaml" | fromYaml).base}}
+    {{- $def_files := $.Files.Glob "compute-defs/**.yaml"}}
+    {{- $defs := deepCopy $outer.Values.compute.nodes }}
+    {{- /* accumulate all of the file values into a single object*/}}
+    {{-  range $path, $_ := $def_files }}
+      {{- $defs = merge $defs ( $.Files.Get $path | fromYaml) }}
+    {{- end }}
+    {{- if gt (len $v.definitions) 0}}
+      {{- range $v.definitions}}
+          {{- if not (hasKey $defs .) }}
+            {{- fail (printf "compute node %s has an undefined def %s" $name .) }}
+          {{- end }}
+          {{- $dest = (include "common.general.update" (dict "base" $dest "src" (get $defs .) "forceAffinityUpdate" true)) | fromYaml }}
+          {{- $dest = (include "retemplate" (dict "value" $dest "context" $outer)) | fromYaml}}
+      {{- end}}
+    {{- end }}
+    {{- $v = (include "common.general.update" (dict "base" $dest "src" $v "forceAffinityUpdate" true)) | fromYaml}}
+    {{- $v = (include "retemplate" (dict "value" $v "context" $outer)) | fromYaml}}
+    {{- $v = omit $v "definitions" }}
+  {{- end }}
+{{- with $outer }}
+{{- if $v.enabled }}
+apiVersion: sunk.coreweave.com/v1alpha1
+kind: NodeSet
+metadata:
+  name: {{ .Release.Name }}-{{ $name }}
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+  annotations:
+    slurm.coreweave.com/cpu: "{{ $v.resources.requests.cpu }}"
+    slurm.coreweave.com/mem: "{{ $v.resources.requests.memory }}"
+    slurm.coreweave.com/features: "{{ join "," (concat (list $name) $v.features) }}"
+    slurm.coreweave.com/gres: "{{ if $v.gresGpu }}gpu:{{ $v.gresGpu }}{{- end }}"
+spec:
+  serviceName: {{ .Release.Name }}-compute
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25
+  replicas: {{ $v.replicas }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: slurmd
+        app.kubernetes.io/instance: {{ .Release.Name }}-{{ $name }}
+        app.kubernetes.io/component: "compute"
+        {{- include "slurm.labels" . | nindent 8 }}
+        {{- if $v.labels }}
+        {{- toYaml $v.labels | nindent 8 }}
+        {{- end }}
+      annotations:
+        kubectl.kubernetes.io/default-container: "slurmd"
+        {{- if $outer.Values.compute.pyxis.enabled }}
+        container.apparmor.security.beta.kubernetes.io/slurmd: "localhost/enroot"
+        {{- end }}
+        {{- include "slurm.networkAffinities" . | nindent 8 }}
+        {{- if $v.annotations }}
+        {{- toYaml $v.annotations | nindent 8 }}
+        {{- end }}
+
+    spec:
+      {{- if $outer.Values.compute.pyxis.enabled }}
+      securityContext:
+        seccompProfile:
+          type: Localhost
+          localhostProfile: profiles/enroot
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      enableServiceLinks: false
+      {{- include "slurm.dnsConfig" . | nindent 6 }}
+      {{- if $v.dnsPolicy }}
+        {{- if eq (lower $v.dnsPolicy) "none" }}
+          - {{ .Release.Namespace }}.svc.cluster.local
+        {{- end }}
+      {{- end }}
+        {{- if $v.dnsConfig }}
+        {{- $v.dnsConfig | toYaml | nindent 8 }}
+        {{- end }}
+      {{- if $v.dnsPolicy }}
+      dnsPolicy: {{ $v.dnsPolicy }}
+      {{- end }}
+      initContainers:
+      # The initcontainer is needed mostly to persist etc from the image in an emptyDir
+      # This way we can modify /etc/passwd and similar via a SSSD sidecar
+      # Munge key does not need to go in the global etc, could go in a specific folder just for munge
+      - name: init
+        image: "{{ $v.image.repository }}:{{ default (print "v" .Chart.Version ) $v.image.tag }}"
+        command: ["/usr/share/sunk/bin/init.sh"]
+        env:
+        - name: ROLE
+          value: "compute"
+        {{- if $v.env }}
+        {{- $v.env | toYaml | nindent 8 }}
+        {{- end }}
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /runtime/var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: etc
+          mountPath: /runtime/etc
+        - name: run
+          mountPath: /run
+        - name: tmp
+          mountPath: /tmp
+        - name: munge
+          mountPath: /munge/munge.secret.key
+          subPath: munge.key
+          readOnly: true
+        - name: opt-sunk
+          mountPath: /opt/sunk
+      containers:
+      {{- include "slurm.sssdContainer" . | nindent 6 }}
+      - name: munged
+        {{- include "slurm.mungedContainer" . | nindent 8 }}
+      - name: slurmd
+        image: "{{ $v.image.repository }}:{{ default (print "v" .Chart.Version ) $v.image.tag }}"
+        resources:
+{{ toYaml $v.resources | indent 10 }}
+        args:
+        - "slurmd"
+        - "-c"
+        - "-D"
+        {{ if $.Values.compute.dynamic -}}
+          - "-Z"
+        - "--conf"
+        - "Feature={{- join "," (concat (list $name) $v.features) }} {{ if $v.gresGpu }}Gres=gpu:{{ $v.gresGpu }}{{ end }}"
+        {{ end -}}
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        {{- if $v.env }}
+        {{- $v.env | toYaml | nindent 8 }}
+        {{- end }}
+        ports:
+        {{- if .Values.compute.ssh.enabled }}
+        - containerPort: 22
+          name: sshd
+          protocol: TCP
+        {{- end }}
+        - containerPort: 6818
+          name: slurmd
+          protocol: TCP
+        volumeMounts:
+        {{- include "slurm.compute.s6.volumeMounts" . | nindent 8 -}}
+        {{- if eq .Values.slurmConfig.slurmCtld.procTrackType "proctrack/cgroup" }}
+        - name: cgroup
+          mountPath: /sys/fs/cgroup
+        {{- end }}
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        {{- if .Values.compute.pyxis.enabled }}
+        - name: enroot-conf
+          mountPath: /etc/enroot/enroot.conf
+          subPath: enroot.conf
+          readOnly: true
+        {{- end }}
+        {{- if .Values.slurmConfig.slurmd.prologConfigMap }}
+        - name: slurm-prolog
+          mountPath: /etc/slurm/prolog.d
+          readOnly: true
+        {{- end }}
+        {{- if .Values.slurmConfig.slurmd.epilogConfigMap }}
+        - name: slurm-epilog
+          mountPath: /etc/slurm/epilog.d
+          readOnly: true
+        {{- end }}
+        {{- if .Values.directoryService.sudoGroups }}
+        - name: sudoers-groups
+          mountPath: /etc/sudoers.d/10-ldap-sudoers
+          subPath: 10-ldap-sudoers
+        {{- end }}
+        - name: opt-sunk
+          mountPath: /opt/sunk
+        - mountPath: /dev/shm
+          name: dshm
+        - name: run
+          mountPath: /run
+        - name: etc
+          mountPath: /etc
+        - name: tmp
+          mountPath: /tmp
+        - name: slurm-conf
+          mountPath: /etc/slurm
+          readOnly: true
+        {{- range .Values.compute.mounts }}
+        - name: {{ regexReplaceAll "[_]" .pvc "-" | lower }}
+          mountPath: {{ .name }}
+        {{- end }}
+        {{- if .Values.compute.securityContext }}
+        securityContext:
+        {{- toYaml .Values.compute.securityContext | nindent 10 }}
+        {{- end }}
+      {{- if $v.containers }}
+      {{- $v.containers | toYaml | nindent 6 }}
+      {{- end }}
+      volumes:
+      {{- include "slurm.config.volume" . | nindent 6 -}}
+      {{- include "slurm.compute.s6.volumes" . | nindent 6 -}}
+      {{- if eq .Values.slurmConfig.slurmCtld.procTrackType "proctrack/cgroup" -}}
+      - name: cgroup
+        hostPath:
+          path: /sys/fs/cgroup
+      {{- end }}
+      {{- if .Values.compute.pyxis.enabled }}
+      - name: enroot-conf
+        projected:
+          sources:
+            - configMap:
+                name: {{ .Release.Name }}-enroot-conf
+      {{- end }}
+      {{- if .Values.slurmConfig.slurmd.prologConfigMap }}
+      - name: slurm-prolog
+        configMap:
+          name: {{ .Values.slurmConfig.slurmd.prologConfigMap }}
+          defaultMode: 0755
+      {{- end }}
+      {{- if .Values.slurmConfig.slurmd.epilogConfigMap }}
+      - name: slurm-epilog
+        configMap:
+          name: {{ .Values.slurmConfig.slurmd.epilogConfigMap }}
+          defaultMode: 0755
+      {{- end }}
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      - name: opt-sunk
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      {{- range .Values.compute.mounts }}
+      - name: {{ regexReplaceAll "[_]" .pvc "-" | lower }}
+        persistentVolumeClaim:
+          claimName: {{ .pvc }}
+      {{- end }}
+      {{- include "slurm.runtimeVolumes" . | nindent 6 }}
+      {{- if $v.volumes }}
+      {{- $v.volumes | toYaml | nindent 6 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      priorityClassName: {{ $v.priorityClassName }}
+      affinity:
+        {{- toYaml $v.affinity | nindent 8 }}
+      tolerations:
+        {{- toYaml $v.tolerations | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

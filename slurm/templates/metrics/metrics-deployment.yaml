@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-metrics
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus-slurm-exporter
+      app.kubernetes.io/instance: {{ .Release.Name }}-metrics
+      app.kubernetes.io/component: "metrics"
+      {{- include "slurm.labels" . | nindent 6 }}
+  replicas: {{ .Values.metrics.replicas }} # by default is 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus-slurm-exporter
+        app.kubernetes.io/instance: {{ .Release.Name }}-metrics
+        app.kubernetes.io/component: "metrics"
+        {{- include "slurm.labels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: "prometheus-slurm-exporter"
+        {{- include "slurm.networkAffinities" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.metrics.terminationGracePeriodSeconds }}
+      {{- include "slurm.dnsConfig" . | nindent 6 }}
+      enableServiceLinks: false
+      initContainers:
+      # The initcontainer is needed mostly to persist etc from the image in an emptyDir
+      # This way we can modify /etc/passwd and similar via a SSSD sidecar
+      - name: init
+        image: "{{ .Values.metrics.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.metrics.image.tag }}"
+        command: ["/usr/share/sunk/bin/init.sh"]
+        volumeMounts:
+        - name: etc
+          mountPath: /runtime/etc
+        - name: run
+          mountPath: /run
+        - name: munge
+          mountPath: /munge/munge.secret.key
+          subPath: munge.key
+          readOnly: true
+      containers:
+      - name: munged
+        {{- include "slurm.mungedContainer" . | nindent 8 }}
+      - name: exporter
+        image: "{{ .Values.metrics.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.metrics.image.tag }}"
+        command: ["prometheus-slurm-exporter", "--gpus-acct", "-listen-address", "0.0.0.0:9341"]
+        resources:
+          {{- toYaml .Values.metrics.resources | nindent 10 }}
+        ports:
+        - containerPort: 9341
+          name: metrics
+        volumeMounts:
+        - name: run
+          mountPath: /run
+        - name: etc
+          mountPath: /etc
+        - name: slurm-conf
+          mountPath: /etc/slurm
+          readOnly: true
+      volumes:
+      {{- include "slurm.runtimeVolumes" . | nindent 6 }}
+      {{- include "slurm.config.volume" . | nindent 6 }}
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.metrics.priorityClassName }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - {{ .Values.nodeSelector.region }}
+              - key: cpu.coreweave.cloud/family
+                operator: In
+                values:
+                  - epyc
+      tolerations:
+        {{- toYaml .Values.controller.tolerations | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

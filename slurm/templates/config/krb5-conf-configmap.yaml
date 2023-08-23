@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-krb5-conf
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+data:
+  krb5.conf: |
+    [libdefaults]
+    default_realm = "it.doesnt.even.matter"
+    rdns = false

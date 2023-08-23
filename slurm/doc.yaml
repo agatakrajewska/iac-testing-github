@@ -1,0 +1,18 @@
+# https://github.com/kubepack/chart-doc-gen
+project:
+  name: SUNK
+  shortName: SUNK
+  url: https://github.com/coreweave/sunk
+  description: Run SlUrm oN Kubernetes
+  app: SLURM, a batch job scheduler
+repository:
+  url: https://github.com/coreweave/sunk
+  name: sunk
+chart:
+  name: slurm
+  version: v0.1.0
+  values: "-- generate from values file --"
+  valuesExample: "-- generate from values file --"
+release:
+  name: slurm
+  namespace: default

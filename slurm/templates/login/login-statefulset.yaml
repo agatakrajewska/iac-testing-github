@@ -1,0 +1,133 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-login
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: login
+      app.kubernetes.io/instance: {{ .Release.Name }}-login
+      app.kubernetes.io/component: "login"
+      {{- include "slurm.labels" . | nindent 6 }}
+  serviceName: {{ .Release.Name }}-login
+  replicas: {{ .Values.login.replicas }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: login
+        app.kubernetes.io/instance: {{ .Release.Name }}-login
+        app.kubernetes.io/component: "login"
+        {{- if .Values.login.service.exposePublicIP }}
+        firewall.coreweave.cloud/allow-all: "true"
+        {{- end }}
+        {{- include "slurm.labels" . | nindent 8 }}
+      annotations:
+        kubectl.kubernetes.io/default-container: "sshd"
+        {{- include "slurm.networkAffinities" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.login.terminationGracePeriodSeconds }}
+      {{- include "slurm.dnsConfig" . | nindent 6 }}
+      enableServiceLinks: false
+      initContainers:
+      # The initcontainer is needed mostly to persist etc from the image in an emptyDir
+      # This way we can modify /etc/passwd and similar via a SSSD sidecar
+      - name: init
+        image: "{{ .Values.login.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.login.image.tag }}"
+        command: ["/usr/share/sunk/bin/init.sh"]
+        env:
+        - name: ROLE
+          value: "login"
+        volumeMounts:
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /runtime/var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - name: etc
+          mountPath: /runtime/etc
+        - name: run
+          mountPath: /run
+        - name: munge
+          mountPath: /munge/munge.secret.key
+          subPath: munge.key
+          readOnly: true
+        - name: ssh-host-keys
+          mountPath: /opt/sunk/etc/ssh
+      containers:
+      {{- include "slurm.sssdContainer" . | nindent 6 }}
+      - name: munged
+        {{- include "slurm.mungedContainer" . | nindent 8 }}
+      - name: sshd
+        image: "{{ .Values.login.image.repository }}:{{ default (print "v" .Chart.Version ) .Values.login.image.tag }}"
+        resources:
+        {{- toYaml .Values.login.resources | nindent 10 }}
+        command: ["/usr/bin/tini", "--"]
+        args: ["/usr/sbin/sshd", "-D"]
+        ports:
+        - containerPort: 22
+          name: sshd
+        volumeMounts:
+        {{- if (include "directories" . ) -}}
+        {{- if .Values.directoryService.sudoGroups }}
+        - name: sudoers-groups
+          mountPath: /etc/sudoers.d/10-ldap-sudoers
+          subPath: 10-ldap-sudoers
+        {{- end }}
+        {{- end }}
+        {{- if (include "directories" . ) }}
+        - name: sssd-pipes
+          mountPath: /var/lib/sss/pipes
+        - name: sssd-cache
+          mountPath: /var/lib/sss/db
+        {{- end }}
+        - mountPath: /dev/shm
+          name: dshm
+        - name: run
+          mountPath: /run
+        - name: etc
+          mountPath: /etc
+        - name: ssh-host-keys
+          mountPath: /opt/sunk/etc/ssh
+        - name: slurm-conf
+          mountPath: /etc/slurm
+          readOnly: true
+        {{- range .Values.compute.mounts }}
+        - name: {{ regexReplaceAll "[_]" .pvc "-" | lower }}
+          mountPath: {{ .name }}
+        {{- end }}
+      volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+      {{- include "slurm.config.volume" . | nindent 6 }}
+      {{- range .Values.compute.mounts }}
+      - name: {{ regexReplaceAll "[_]" .pvc "-" | lower }}
+        persistentVolumeClaim:
+          claimName: {{ .pvc }}
+      {{- end }}
+      {{- include "slurm.runtimeVolumes" . | nindent 6 }}
+      - name: ssh-host-keys
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-ssh-host-keys
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.login.priorityClassName }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: topology.kubernetes.io/region
+                operator: In
+                values:
+                - {{ .Values.nodeSelector.region }}
+              - key: cpu.coreweave.cloud/family
+                operator: In
+                values:
+                  - epyc
+      tolerations:
+        {{- toYaml .Values.login.tolerations | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
